@@ -494,7 +494,7 @@ class Responsive_Scanner extends Scanner_Base {
     }
 
     /**
-     * Check rendered CSS for general responsive issues.
+     * Check raw post content for general responsive CSS issues.
      */
     private function scan_rendered_css( $scan_id, $post_id ) {
         $html = $this->get_rendered_html( $post_id );
@@ -502,9 +502,9 @@ class Responsive_Scanner extends Scanner_Base {
             return;
         }
 
-        // Extract inline styles for common issues.
+        // Check inline styles and CSS patterns in post content.
         $this->check_inline_styles( $scan_id, $post_id, $html );
-        $this->check_viewport_meta( $scan_id, $post_id, $html );
+        // Note: viewport meta check is skipped — it's set by the theme, not post content.
         $this->check_horizontal_scroll_risks( $scan_id, $post_id, $html );
     }
 
