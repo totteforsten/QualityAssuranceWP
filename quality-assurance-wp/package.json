@@ -1,0 +1,12 @@
+{
+    "name": "quality-assurance-wp",
+    "version": "1.0.0",
+    "description": "Screenshot capture dependencies for the QA WordPress plugin",
+    "private": true,
+    "scripts": {
+        "capture": "node assets/screenshot-capture.js"
+    },
+    "dependencies": {
+        "puppeteer": "^22.0.0"
+    }
+}
