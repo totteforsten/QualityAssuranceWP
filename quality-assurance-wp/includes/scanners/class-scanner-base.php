@@ -18,6 +18,13 @@ abstract class Scanner_Base {
     /** @var array Plugin settings */
     protected $settings;
 
+    /**
+     * In-memory HTML cache keyed by post_id.
+     * Shared across scanner instances via static property so that
+     * link scanner + SEO scanner don't re-fetch the same page.
+     */
+    private static $html_cache = [];
+
     public function __construct() {
         $this->db       = new Database();
         $this->settings = get_option( 'flavor_qa_settings', [] );
@@ -25,9 +32,6 @@ abstract class Scanner_Base {
 
     /**
      * Scan a single post/page.
-     *
-     * @param int $scan_id The scan session ID.
-     * @param int $post_id The post to scan.
      */
     abstract public function scan_post( $scan_id, $post_id );
 
@@ -59,11 +63,17 @@ abstract class Scanner_Base {
     }
 
     /**
-     * Get the rendered HTML content of a post.
+     * Get the rendered HTML content of a post, with caching.
+     * Multiple scanners processing the same post will share one HTTP fetch.
      */
     protected function get_rendered_html( $post_id ) {
+        if ( isset( self::$html_cache[ $post_id ] ) ) {
+            return self::$html_cache[ $post_id ];
+        }
+
         $url = get_permalink( $post_id );
         if ( ! $url ) {
+            self::$html_cache[ $post_id ] = '';
             return '';
         }
 
@@ -73,10 +83,31 @@ abstract class Scanner_Base {
         ] );
 
         if ( is_wp_error( $response ) ) {
+            self::$html_cache[ $post_id ] = '';
             return '';
         }
 
-        return wp_remote_retrieve_body( $response );
+        $html = wp_remote_retrieve_body( $response );
+        self::$html_cache[ $post_id ] = $html;
+
+        // Keep cache from growing unbounded (keep last 20 pages).
+        if ( count( self::$html_cache ) > 20 ) {
+            $keys = array_keys( self::$html_cache );
+            unset( self::$html_cache[ $keys[0] ] );
+        }
+
+        return $html;
+    }
+
+    /**
+     * Flush the HTML cache for a specific post or entirely.
+     */
+    public static function flush_html_cache( $post_id = null ) {
+        if ( $post_id ) {
+            unset( self::$html_cache[ $post_id ] );
+        } else {
+            self::$html_cache = [];
+        }
     }
 
     /**
@@ -94,13 +125,11 @@ abstract class Scanner_Base {
      * Detect which page builder (if any) is used for a post.
      */
     protected function detect_builder( $post_id ) {
-        // Check Elementor.
         $elementor_data = get_post_meta( $post_id, '_elementor_data', true );
         if ( ! empty( $elementor_data ) ) {
             return 'elementor';
         }
 
-        // Check Breakdance.
         $breakdance_data = get_post_meta( $post_id, '_breakdance_data', true );
         if ( ! empty( $breakdance_data ) ) {
             return 'breakdance';

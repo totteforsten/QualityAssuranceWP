@@ -113,14 +113,17 @@ class Plugin {
             $post_ids = $this->get_all_scannable_posts();
         }
 
-        foreach ( $scan_types as $type ) {
-            foreach ( $post_ids as $post_id ) {
-                $this->background_process->push_to_queue( [
-                    'scan_id' => $scan_id,
-                    'type'    => $type,
-                    'post_id' => $post_id,
-                ] );
-            }
+        // Clear the link URL cache from any previous scan.
+        Scanners\Link_Scanner::clear_url_cache();
+
+        // Bundle all scanner types into one queue item per post.
+        // This way the rendered HTML is fetched once per post, shared across scanners.
+        foreach ( $post_ids as $post_id ) {
+            $this->background_process->push_to_queue( [
+                'scan_id' => $scan_id,
+                'post_id' => $post_id,
+                'types'   => $scan_types,
+            ] );
         }
 
         $this->background_process->save()->dispatch();

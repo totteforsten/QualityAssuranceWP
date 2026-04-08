@@ -182,6 +182,13 @@ class Rest_API {
                 'new_settings' => [ 'type' => 'object',  'required' => true ],
             ],
         ] );
+
+        // Install Puppeteer (npm install).
+        register_rest_route( $this->namespace, '/screenshots/install', [
+            'methods'             => 'POST',
+            'callback'            => [ $this, 'install_puppeteer' ],
+            'permission_callback' => [ $this, 'check_admin_permission' ],
+        ] );
     }
 
     public function check_admin_permission() {
@@ -457,6 +464,55 @@ class Rest_API {
         }
 
         return new \WP_Error( 'update_failed', 'Could not update element.', [ 'status' => 500 ] );
+    }
+
+    public function install_puppeteer( $request ) {
+        $plugin_dir = FLAVOR_QA_PLUGIN_DIR;
+        $package_json = $plugin_dir . 'package.json';
+
+        if ( ! file_exists( $package_json ) ) {
+            return new \WP_Error( 'missing_package', 'package.json not found.', [ 'status' => 500 ] );
+        }
+
+        // Find npm.
+        $npm_path = '';
+        $possible = [ '/usr/bin/npm', '/usr/local/bin/npm' ];
+        foreach ( $possible as $p ) {
+            if ( file_exists( $p ) ) {
+                $npm_path = $p;
+                break;
+            }
+        }
+        if ( ! $npm_path ) {
+            exec( 'which npm 2>/dev/null', $which_output );
+            $npm_path = ! empty( $which_output[0] ) ? $which_output[0] : '';
+        }
+
+        if ( empty( $npm_path ) ) {
+            return new \WP_Error( 'npm_not_found', 'npm not found on this server. Install Node.js first.', [ 'status' => 500 ] );
+        }
+
+        $cmd = sprintf(
+            'cd %s && %s install --production 2>&1',
+            escapeshellarg( $plugin_dir ),
+            escapeshellcmd( $npm_path )
+        );
+
+        $output = [];
+        $return_code = 0;
+        exec( $cmd, $output, $return_code );
+
+        $output_str = implode( "\n", $output );
+
+        if ( 0 !== $return_code ) {
+            return new \WP_Error( 'install_failed', 'npm install failed: ' . $output_str, [ 'status' => 500 ] );
+        }
+
+        return rest_ensure_response( [
+            'success' => true,
+            'message' => 'Puppeteer installed successfully.',
+            'output'  => $output_str,
+        ] );
     }
 
     // ─── Auto-fix logic ─────────────────────────────────────

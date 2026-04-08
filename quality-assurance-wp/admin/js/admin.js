@@ -28,6 +28,9 @@
             // Fix all button.
             $('#flavor-qa-fix-all').on('click', this.fixAll.bind(this));
 
+            // Install Puppeteer.
+            $('#flavor-qa-install-puppeteer').on('click', this.installPuppeteer.bind(this));
+
             // Fix by category.
             $(document).on('click', '.flavor-qa-fix-category', this.fixCategory.bind(this));
 
@@ -269,6 +272,29 @@
                 .fail(function() {
                     // Continue with next batch even on failure.
                     QA.processBulkFix(ids, offset + batchSize, total);
+                });
+        },
+
+        // ─── Install Puppeteer ──────────────────────────────
+
+        installPuppeteer: function(e) {
+            e.preventDefault();
+            const $btn = $(e.currentTarget);
+            const $status = $('#flavor-qa-install-status');
+
+            $btn.prop('disabled', true).text('Installing...');
+            $status.text('This may take a minute...').css('color', '#646970');
+
+            this.apiRequest('screenshots/install', 'POST')
+                .done(function(response) {
+                    $status.text('Puppeteer installed successfully!').css('color', '#00a32a');
+                    $btn.text('Installed').addClass('button-disabled');
+                    setTimeout(function() { location.reload(); }, 2000);
+                })
+                .fail(function(xhr) {
+                    const msg = xhr.responseJSON ? xhr.responseJSON.message : 'Installation failed.';
+                    $status.text(msg).css('color', '#d63638');
+                    $btn.prop('disabled', false).text('Retry Install');
                 });
         },
 

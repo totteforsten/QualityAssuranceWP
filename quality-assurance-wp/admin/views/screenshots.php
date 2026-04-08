@@ -28,10 +28,50 @@ foreach ( $screenshots as $ss ) {
         <div class="notice notice-info">
             <p><?php esc_html_e( 'No scan data available. Run a scan with Screenshots enabled from the Dashboard.', 'quality-assurance-wp' ); ?></p>
         </div>
-    <?php elseif ( empty( $screenshots ) ) : ?>
+    <?php elseif ( empty( $screenshots ) ) :
+        $plugin_dir = FLAVOR_QA_PLUGIN_DIR;
+        $has_puppeteer = is_dir( FLAVOR_QA_PLUGIN_DIR . 'node_modules/puppeteer' );
+        $has_node = false;
+        $node_paths = [ '/usr/bin/node', '/usr/local/bin/node' ];
+        foreach ( $node_paths as $np ) {
+            if ( file_exists( $np ) ) { $has_node = true; break; }
+        }
+        if ( ! $has_node ) {
+            exec( 'which node 2>/dev/null', $node_output );
+            $has_node = ! empty( $node_output );
+        }
+    ?>
         <div class="notice notice-warning">
-            <p><?php esc_html_e( 'No screenshots found. Make sure Screenshots is enabled when running a scan, and that Node.js + Puppeteer are installed.', 'quality-assurance-wp' ); ?></p>
-            <p><?php esc_html_e( 'Run: cd /path/to/plugin && npm install', 'quality-assurance-wp' ); ?></p>
+            <p><?php esc_html_e( 'No screenshots found. Make sure Screenshots is enabled when running a scan.', 'quality-assurance-wp' ); ?></p>
+
+            <h4><?php esc_html_e( 'Setup Status:', 'quality-assurance-wp' ); ?></h4>
+            <ul style="list-style:disc;margin-left:20px;">
+                <li>
+                    <?php if ( $has_node ) : ?>
+                        <strong style="color:#00a32a;">&#10003;</strong> <?php esc_html_e( 'Node.js found', 'quality-assurance-wp' ); ?>
+                    <?php else : ?>
+                        <strong style="color:#d63638;">&#10007;</strong> <?php esc_html_e( 'Node.js not found. Install Node.js 18+ on your server.', 'quality-assurance-wp' ); ?>
+                    <?php endif; ?>
+                </li>
+                <li>
+                    <?php if ( $has_puppeteer ) : ?>
+                        <strong style="color:#00a32a;">&#10003;</strong> <?php esc_html_e( 'Puppeteer installed', 'quality-assurance-wp' ); ?>
+                    <?php else : ?>
+                        <strong style="color:#d63638;">&#10007;</strong> <?php esc_html_e( 'Puppeteer not installed.', 'quality-assurance-wp' ); ?>
+                    <?php endif; ?>
+                </li>
+            </ul>
+
+            <?php if ( ! $has_puppeteer ) : ?>
+                <p><?php esc_html_e( 'To install Puppeteer, run this command on your server:', 'quality-assurance-wp' ); ?></p>
+                <p><code>cd <?php echo esc_html( $plugin_dir ); ?> && npm install</code></p>
+                <?php if ( $has_node ) : ?>
+                    <button id="flavor-qa-install-puppeteer" class="button button-primary">
+                        <?php esc_html_e( 'Install Puppeteer Now', 'quality-assurance-wp' ); ?>
+                    </button>
+                    <span id="flavor-qa-install-status" style="margin-left:10px;"></span>
+                <?php endif; ?>
+            <?php endif; ?>
         </div>
     <?php else : ?>
 
