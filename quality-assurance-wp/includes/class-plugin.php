@@ -105,6 +105,10 @@ class Plugin {
     /**
      * Start a full scan.
      */
+    /**
+     * Start a full scan. Creates the scan record.
+     * Actual processing is now driven by the REST API process-batch endpoint.
+     */
     public function start_scan( $scan_types = [], $post_ids = [] ) {
         $db = new Database();
         $scan_id = $db->create_scan( $scan_types );
@@ -113,20 +117,8 @@ class Plugin {
             $post_ids = $this->get_all_scannable_posts();
         }
 
-        // Clear the link URL cache from any previous scan.
         Scanners\Link_Scanner::clear_url_cache();
-
-        // Bundle all scanner types into one queue item per post.
-        // This way the rendered HTML is fetched once per post, shared across scanners.
-        foreach ( $post_ids as $post_id ) {
-            $this->background_process->push_to_queue( [
-                'scan_id' => $scan_id,
-                'post_id' => $post_id,
-                'types'   => $scan_types,
-            ] );
-        }
-
-        $this->background_process->save()->dispatch();
+        Scanners\Scanner_Base::flush_html_cache();
 
         return $scan_id;
     }

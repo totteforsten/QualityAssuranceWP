@@ -31,6 +31,11 @@ $recent_scans = $db->get_scans( [ 'per_page' => 5 ] );
                 <span class="flavor-qa-progress-text">0%</span>
                 <span class="flavor-qa-progress-status"><?php esc_html_e( 'Initializing...', 'quality-assurance-wp' ); ?></span>
             </div>
+            <!-- Live Scan Log -->
+            <div id="flavor-qa-scan-log" class="flavor-qa-scan-log" style="display:none;">
+                <h3><?php esc_html_e( 'Scan Log', 'quality-assurance-wp' ); ?></h3>
+                <div class="flavor-qa-log-entries"></div>
+            </div>
         </div>
     </div>
 

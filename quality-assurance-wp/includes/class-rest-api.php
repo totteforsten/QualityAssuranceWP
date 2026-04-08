@@ -44,6 +44,18 @@ class Rest_API {
             'permission_callback' => [ $this, 'check_admin_permission' ],
         ] );
 
+        // Process next batch of posts for a scan (chunked AJAX scanning).
+        register_rest_route( $this->namespace, '/scan/process-batch', [
+            'methods'             => 'POST',
+            'callback'            => [ $this, 'process_batch' ],
+            'permission_callback' => [ $this, 'check_admin_permission' ],
+            'args'                => [
+                'scan_id' => [ 'type' => 'integer', 'required' => true ],
+                'offset'  => [ 'type' => 'integer', 'default' => 0 ],
+                'limit'   => [ 'type' => 'integer', 'default' => 5 ],
+            ],
+        ] );
+
         // Get scan list.
         register_rest_route( $this->namespace, '/scans', [
             'methods'             => 'GET',
@@ -202,28 +214,152 @@ class Rest_API {
         $post_ids = $request->get_param( 'post_ids' );
 
         $valid_types = [ 'links', 'seo', 'responsive', 'screenshots' ];
-        $types = array_intersect( $types, $valid_types );
+        $types = array_values( array_intersect( $types, $valid_types ) );
 
         if ( empty( $types ) ) {
             return new \WP_Error( 'invalid_types', 'No valid scan types provided.', [ 'status' => 400 ] );
         }
 
-        $scan_id = $this->plugin->start_scan( $types, $post_ids );
+        // Clear caches from previous scans.
+        Scanners\Link_Scanner::clear_url_cache();
+        Scanners\Scanner_Base::flush_html_cache();
 
+        // Create scan record. The frontend will drive processing via process-batch.
         $db = new Database();
-        $posts_count = empty( $post_ids )
-            ? count( $this->plugin->get_all_scannable_posts() )
-            : count( $post_ids );
+        $scan_id = $db->create_scan( $types );
 
-        $db->update_scan( $scan_id, [
-            'total_items' => $posts_count * count( $types ),
-        ] );
+        if ( empty( $post_ids ) ) {
+            $post_ids = $this->plugin->get_all_scannable_posts();
+        }
+
+        $total_items = count( $post_ids ) * count( $types );
+        $db->update_scan( $scan_id, [ 'total_items' => $total_items ] );
+
+        // Store the post list and types so process-batch can pick them up.
+        update_option( 'flavor_qa_scan_' . $scan_id . '_posts', $post_ids, false );
+        update_option( 'flavor_qa_scan_' . $scan_id . '_types', $types, false );
 
         return rest_ensure_response( [
             'scan_id'     => $scan_id,
-            'total_items' => $posts_count * count( $types ),
+            'total_posts' => count( $post_ids ),
+            'total_items' => $total_items,
             'types'       => $types,
-            'message'     => 'Scan started. Processing in background.',
+        ] );
+    }
+
+    /**
+     * Process a batch of posts for a scan.
+     * Called repeatedly by the frontend JS until all posts are done.
+     * Returns a log of what was checked for real-time display.
+     */
+    public function process_batch( $request ) {
+        $scan_id = (int) $request->get_param( 'scan_id' );
+        $offset  = (int) $request->get_param( 'offset' );
+        $limit   = (int) $request->get_param( 'limit' );
+
+        $db   = new Database();
+        $scan = $db->get_scan( $scan_id );
+
+        if ( ! $scan ) {
+            return new \WP_Error( 'not_found', 'Scan not found.', [ 'status' => 404 ] );
+        }
+
+        $post_ids = get_option( 'flavor_qa_scan_' . $scan_id . '_posts', [] );
+        $types    = get_option( 'flavor_qa_scan_' . $scan_id . '_types', [] );
+
+        if ( empty( $post_ids ) || empty( $types ) ) {
+            return new \WP_Error( 'invalid_scan', 'Scan data not found.', [ 'status' => 400 ] );
+        }
+
+        // Get the batch of posts for this chunk.
+        $batch = array_slice( $post_ids, $offset, $limit );
+        $log   = [];
+        $items_done = 0;
+
+        // Increase time limit for this request.
+        if ( function_exists( 'set_time_limit' ) ) {
+            @set_time_limit( 120 );
+        }
+
+        foreach ( $batch as $post_id ) {
+            $post_title = get_the_title( $post_id );
+            $post_url   = get_permalink( $post_id );
+
+            $log[] = [
+                'type'    => 'start',
+                'message' => sprintf( 'Scanning: %s (#%d)', $post_title, $post_id ),
+            ];
+
+            foreach ( $types as $type ) {
+                $scanner = $this->plugin->get_scanner( $type );
+                if ( ! $scanner ) {
+                    continue;
+                }
+
+                $start_time = microtime( true );
+
+                try {
+                    $scanner->scan_post( $scan_id, $post_id );
+                    $elapsed = round( microtime( true ) - $start_time, 2 );
+
+                    $log[] = [
+                        'type'    => 'done',
+                        'message' => sprintf( '  [%s] completed in %ss', $type, $elapsed ),
+                    ];
+                } catch ( \Exception $e ) {
+                    $db->insert_issue( [
+                        'scan_id'      => $scan_id,
+                        'post_id'      => $post_id,
+                        'scanner_type' => $type,
+                        'severity'     => 'error',
+                        'category'     => 'scan_error',
+                        'title'        => 'Scan Error',
+                        'description'  => $e->getMessage(),
+                    ] );
+
+                    $log[] = [
+                        'type'    => 'error',
+                        'message' => sprintf( '  [%s] ERROR: %s', $type, $e->getMessage() ),
+                    ];
+                }
+
+                $items_done++;
+            }
+
+            // Flush HTML cache per post to keep memory low.
+            Scanners\Scanner_Base::flush_html_cache( $post_id );
+        }
+
+        // Update scan progress.
+        $completed = (int) $scan->completed_items + $items_done;
+        $db->update_scan( $scan_id, [ 'completed_items' => $completed ] );
+
+        $total       = (int) $scan->total_items;
+        $is_complete = ( $offset + $limit ) >= count( $post_ids );
+
+        if ( $is_complete ) {
+            $db->complete_scan( $scan_id );
+            Scanners\Link_Scanner::clear_url_cache();
+
+            // Clean up stored post list.
+            delete_option( 'flavor_qa_scan_' . $scan_id . '_posts' );
+            delete_option( 'flavor_qa_scan_' . $scan_id . '_types' );
+
+            $log[] = [
+                'type'    => 'complete',
+                'message' => sprintf( 'Scan complete! %d issues found.', $db->count_issues_for_scan( $scan_id ) ),
+            ];
+        }
+
+        return rest_ensure_response( [
+            'scan_id'        => $scan_id,
+            'offset'         => $offset,
+            'processed'      => count( $batch ),
+            'completed_items' => $completed,
+            'total_items'    => $total,
+            'progress'       => $total > 0 ? round( ( $completed / $total ) * 100, 1 ) : 0,
+            'is_complete'    => $is_complete,
+            'log'            => $log,
         ] );
     }
 
