@@ -200,6 +200,11 @@ class Link_Scanner extends Scanner_Base {
     private function check_urls_parallel( $urls, $timeout = 15 ) {
         $results = [];
 
+        // Fall back to sequential wp_remote_head if curl_multi is unavailable.
+        if ( ! function_exists( 'curl_multi_init' ) ) {
+            return $this->check_urls_sequential( $urls, $timeout );
+        }
+
         // Process in batches.
         $batches = array_chunk( $urls, self::PARALLEL_LIMIT );
 
@@ -463,6 +468,54 @@ class Link_Scanner extends Scanner_Base {
 
     private function is_broken_status( $status ) {
         return 0 === $status || $status >= 400;
+    }
+
+    /**
+     * Fallback: check URLs one at a time using wp_remote_head.
+     * Used when curl_multi is not available.
+     */
+    private function check_urls_sequential( $urls, $timeout ) {
+        $results = [];
+        foreach ( $urls as $url ) {
+            $start = microtime( true );
+
+            $response = wp_remote_head( $url, [
+                'timeout'     => min( $timeout, 10 ),
+                'redirection' => 5,
+                'sslverify'   => false,
+                'user-agent'  => 'QualityAssurance-WP/1.0 (Link Checker)',
+            ] );
+
+            $time = microtime( true ) - $start;
+
+            if ( is_wp_error( $response ) ) {
+                $results[ $url ] = [
+                    'status'       => 0,
+                    'redirect_url' => '',
+                    'time'         => $time,
+                    'error'        => $response->get_error_message(),
+                ];
+                continue;
+            }
+
+            $status    = (int) wp_remote_retrieve_response_code( $response );
+            $final_url = '';
+
+            if ( isset( $response['http_response'] ) && is_object( $response['http_response'] ) ) {
+                $resp_obj = $response['http_response']->get_response_object();
+                if ( $resp_obj && isset( $resp_obj->url ) && $resp_obj->url !== $url ) {
+                    $final_url = $resp_obj->url;
+                }
+            }
+
+            $results[ $url ] = [
+                'status'       => $status,
+                'redirect_url' => $final_url,
+                'time'         => $time,
+                'error'        => '',
+            ];
+        }
+        return $results;
     }
 
     /**

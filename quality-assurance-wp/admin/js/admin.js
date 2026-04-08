@@ -116,8 +116,16 @@
                 }
             })
             .fail(function(xhr) {
-                var msg = xhr.responseJSON ? xhr.responseJSON.message : 'Request failed';
-                QA.logAppend('error', 'Batch error: ' + msg + ' — retrying...');
+                var msg = 'Request failed';
+                if (xhr.responseJSON) {
+                    // Show detailed PHP error if available.
+                    msg = xhr.responseJSON.message || xhr.responseJSON.data?.message || JSON.stringify(xhr.responseJSON).substring(0, 300);
+                } else if (xhr.responseText) {
+                    // Strip HTML tags for readability.
+                    msg = xhr.responseText.replace(/<[^>]*>/g, ' ').substring(0, 300).trim();
+                }
+                QA.logAppend('error', 'Batch error: ' + msg);
+                QA.logAppend('info', 'Retrying...');
 
                 // Retry this batch once after a short delay.
                 setTimeout(function() {

@@ -253,6 +253,23 @@ class Rest_API {
      * Returns a log of what was checked for real-time display.
      */
     public function process_batch( $request ) {
+        // Register shutdown handler to catch fatal errors and return useful info.
+        $error_log = [];
+        register_shutdown_function( function() use ( &$error_log ) {
+            $error = error_get_last();
+            if ( $error && in_array( $error['type'], [ E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR ], true ) ) {
+                // Clear any output buffer.
+                while ( ob_get_level() ) {
+                    ob_end_clean();
+                }
+                $msg = sprintf( '%s in %s:%d', $error['message'], basename( $error['file'] ), $error['line'] );
+                wp_send_json_error( [
+                    'message'   => 'PHP Fatal: ' . $msg,
+                    'php_error' => $error,
+                ], 500 );
+            }
+        } );
+
         $scan_id = (int) $request->get_param( 'scan_id' );
         $offset  = (int) $request->get_param( 'offset' );
         $limit   = (int) $request->get_param( 'limit' );
@@ -283,7 +300,6 @@ class Rest_API {
 
         foreach ( $batch as $post_id ) {
             $post_title = get_the_title( $post_id );
-            $post_url   = get_permalink( $post_id );
 
             $log[] = [
                 'type'    => 'start',
@@ -298,6 +314,7 @@ class Rest_API {
 
                 $start_time = microtime( true );
 
+                // Catch both Exception AND Error (PHP 7+ fatal errors like TypeError).
                 try {
                     $scanner->scan_post( $scan_id, $post_id );
                     $elapsed = round( microtime( true ) - $start_time, 2 );
@@ -306,7 +323,7 @@ class Rest_API {
                         'type'    => 'done',
                         'message' => sprintf( '  [%s] completed in %ss', $type, $elapsed ),
                     ];
-                } catch ( \Exception $e ) {
+                } catch ( \Throwable $e ) {
                     $db->insert_issue( [
                         'scan_id'      => $scan_id,
                         'post_id'      => $post_id,
@@ -314,12 +331,18 @@ class Rest_API {
                         'severity'     => 'error',
                         'category'     => 'scan_error',
                         'title'        => 'Scan Error',
-                        'description'  => $e->getMessage(),
+                        'description'  => $e->getMessage() . ' in ' . basename( $e->getFile() ) . ':' . $e->getLine(),
                     ] );
 
                     $log[] = [
                         'type'    => 'error',
-                        'message' => sprintf( '  [%s] ERROR: %s', $type, $e->getMessage() ),
+                        'message' => sprintf(
+                            '  [%s] ERROR: %s (in %s:%d)',
+                            $type,
+                            $e->getMessage(),
+                            basename( $e->getFile() ),
+                            $e->getLine()
+                        ),
                     ];
                 }
 

@@ -329,6 +329,7 @@ abstract class Scanner_Base {
 
     /**
      * Parse HTML string into DOMDocument.
+     * Compatible with PHP 8.2+ (HTML-ENTITIES encoding was removed).
      */
     protected function parse_html( $html ) {
         if ( empty( $html ) ) {
@@ -336,7 +337,19 @@ abstract class Scanner_Base {
         }
         $dom = new \DOMDocument();
         libxml_use_internal_errors( true );
-        $dom->loadHTML( mb_convert_encoding( $html, 'HTML-ENTITIES', 'UTF-8' ), LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD );
+        // Prepend XML encoding declaration instead of mb_convert_encoding
+        // which breaks on PHP 8.2+ (HTML-ENTITIES removed).
+        $dom->loadHTML(
+            '<?xml encoding="UTF-8">' . $html,
+            LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD
+        );
+        // Remove the XML declaration node if added.
+        foreach ( $dom->childNodes as $node ) {
+            if ( XML_PI_NODE === $node->nodeType ) {
+                $dom->removeChild( $node );
+                break;
+            }
+        }
         libxml_clear_errors();
         return $dom;
     }
