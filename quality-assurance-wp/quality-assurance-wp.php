@@ -26,7 +26,7 @@ define( 'FLAVOR_QA_DB_VERSION', '1.0.0' );
 
 // Autoload classes.
 spl_autoload_register( function ( $class ) {
-    $prefix = 'flavor_QA\\';
+    $prefix = 'Flavor_QA\\';
     $base_dir = FLAVOR_QA_PLUGIN_DIR . 'includes/';
 
     $len = strlen( $prefix );
